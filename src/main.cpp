@@ -126,6 +126,21 @@ void SysProvEvent(arduino_event_t *sys_event) {
   }
 }
 
+// Return true if D0 is held LOW for hold_ms at boot
+static bool bootLongPressToClear(uint32_t hold_ms = 2000) {
+  pinMode(0, INPUT_PULLUP);
+  // Require button to be already pressed (LOW) at boot
+  if (digitalRead(0) != LOW) return false;
+  uint32_t start = millis();
+  while (millis() - start < hold_ms) {
+    if (digitalRead(0) != LOW) {
+      return false;  // released before hold time
+    }
+    delay(10);
+  }
+  return true;  // held long enough
+}
+
 void setup() {
   Serial.begin(115200);
   delay(100);
@@ -150,6 +165,17 @@ void setup() {
   tftPrintCentered("HiveSync", 8, 2, ST77XX_YELLOW);
   tftPrintCentered("Waiting...", 30, 1, ST77XX_WHITE);
 
+  // Option on boot: long-press D0 to clear provisioning
+  bool resetProv = false;
+  if (bootLongPressToClear(2500)) {
+    resetProv = true;
+    tft.fillScreen(ST77XX_BLACK);
+    tftPrintCentered("HiveSync", 8, 2, ST77XX_YELLOW);
+    tftPrintCentered("Clearing provisioning...", 40, 1, ST77XX_RED);
+    Serial.println("Long press detected on D0: clearing provisioning");
+    delay(300);
+  }
+
   // Register provisioning/WiFi events
   WiFi.onEvent(SysProvEvent);
 
@@ -165,7 +191,7 @@ void setup() {
       g_deviceName.c_str(),
       nullptr,
       uuid,
-      false  // do not reset previously provisioned data
+      resetProv  // clear provisioning when D0 held during boot
   );
 }
 
