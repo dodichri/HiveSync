@@ -7,6 +7,8 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7789.h>
 #include <qrcode_st7789.h>
+// Use Adafruit GFX FreeFont: FreeSans12pt7b
+#include <Fonts/FreeSans12pt7b.h>
 
 // Pins come from the board variant for Adafruit ESP32-S3 Reverse TFT Feather
 // TFT_CS, TFT_DC, TFT_RST, TFT_BACKLITE, SCK, MISO, MOSI are defined by the variant
@@ -21,14 +23,13 @@ QRcode_ST7789 qrcode(&tft);
 String g_deviceName;  // HiveSync-<last4>
 String g_pop;         // Hive-<last6>
 
-static void tftPrintCentered(const String &text, int16_t y, uint8_t size = 2, uint16_t color = ST77XX_WHITE) {
-  tft.setTextSize(size);
+static void tftPrintCentered(const String &text, int16_t y, uint16_t color = ST77XX_WHITE) {
   tft.setTextColor(color);
   int16_t x1, y1;
   uint16_t w, h;
+  // For GFX fonts, x1 may be negative; account for it when centering
   tft.getTextBounds(text, 0, y, &x1, &y1, &w, &h);
-  int16_t x = (tft.width() - (int16_t)w) / 2;
-  // Ensure non-negative x without relying on std::max overloads
+  int16_t x = (tft.width() - (int16_t)w) / 2 - x1;
   if (x < 0) x = 0;
   tft.setCursor(x, y);
   tft.print(text);
@@ -42,12 +43,12 @@ static void displayQRPayload(const String &payload) {
 
 static void displayIP(const IPAddress &ip) {
   tft.fillScreen(ST77XX_BLACK);
-  tftPrintCentered("HiveSync", 8, 2, ST77XX_YELLOW);
+  tftPrintCentered("HiveSync", 8, ST77XX_YELLOW);
 
   tft.setTextWrap(false);
-  tftPrintCentered("Connected", 32, 1, ST77XX_GREEN);
-  tftPrintCentered("IP:", 52, 1, ST77XX_WHITE);
-  tftPrintCentered(ip.toString(), 68, 2, ST77XX_CYAN);
+  tftPrintCentered("Connected", 32, ST77XX_GREEN);
+  tftPrintCentered("IP:", 52, ST77XX_WHITE);
+  tftPrintCentered(ip.toString(), 68, ST77XX_CYAN);
 }
 
 static String buildQRPayload(const String &name, const String &pop, const char *transport) {
@@ -162,16 +163,18 @@ void setup() {
   tft.setRotation(3);
   tft.fillScreen(ST77XX_BLACK);
   tft.setTextWrap(false);
-  tftPrintCentered("HiveSync", 8, 2, ST77XX_YELLOW);
-  tftPrintCentered("Waiting...", 30, 1, ST77XX_WHITE);
+  // Select FreeSans 12pt GFX font for all subsequent text
+  tft.setFont(&FreeSans12pt7b);
+  tftPrintCentered("HiveSync", 8, ST77XX_YELLOW);
+  tftPrintCentered("Waiting...", 30, ST77XX_WHITE);
 
   // Option on boot: long-press D0 to clear provisioning
   bool resetProv = false;
   if (bootLongPressToClear(2500)) {
     resetProv = true;
     tft.fillScreen(ST77XX_BLACK);
-    tftPrintCentered("HiveSync", 8, 2, ST77XX_YELLOW);
-    tftPrintCentered("Clearing provisioning...", 40, 1, ST77XX_RED);
+    tftPrintCentered("HiveSync", 8, ST77XX_YELLOW);
+    tftPrintCentered("Clearing provisioning...", 40, ST77XX_RED);
     Serial.println("Long press detected on D0: clearing provisioning");
     delay(300);
   }
