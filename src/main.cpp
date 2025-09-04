@@ -1,61 +1,28 @@
 // HiveSync: BLE Wi-Fi provisioning with QR on TFT
 #include <Arduino.h>
-#include <SPI.h>
 #include <WiFi.h>
 #include <WiFiProv.h>
+#include "esp_sleep.h"
 
-#include <Adafruit_GFX.h>
-#include <Adafruit_ST7789.h>
-#include <qrcode_st7789.h>
-// Use Adafruit GFX FreeFont: FreeSans12pt7b
-#include <Fonts/FreeSans12pt7b.h>
-
-// Define y-coordinates for TFT text lines
-// Keep exact values used throughout to preserve layout
-#define TFT_LINE_1  18
-#define TFT_LINE_2  42
-#define TFT_LINE_3  66
-#define TFT_LINE_4  90
-#define TFT_LINE_5  114
-
-// Pins come from the board variant for Adafruit ESP32-S3 Reverse TFT Feather
-// TFT_CS, TFT_DC, TFT_RST, TFT_BACKLITE, SCK, MISO, MOSI are defined by the variant
-#ifndef TFT_CS
-#error "This sketch requires a board variant defining TFT pins (TFT_CS/DC/RST/BACKLITE)."
-#endif
-
-Adafruit_ST7789 tft(&SPI, TFT_CS, TFT_DC, TFT_RST);
-QRcode_ST7789 qrcode(&tft);
+#include "display.h"
+#include "buttons.h"
+#include "sensors.h"
+// Battery fuel gauge
+#include "battery.h"
+// INMP441 I2S microphone + FFT
+#include "audio_inmp441.h"
 
 // Globals for device identity
 String g_deviceName;  // HiveSync-<last4>
 String g_pop;         // Hive-<last6>
 
-// Left-align text at the display's left edge (no centering)
-static void tftPrint(const String &text, int16_t y, uint16_t color = ST77XX_WHITE) {
-  tft.setTextColor(color);
-  int16_t x1, y1;
-  uint16_t w, h;
-  // For GFX fonts, glyphs can extend left of the cursor. Shift so the
-  // leftmost pixel of the text sits at x=0 without centering.
-  tft.getTextBounds(text, 0, y, &x1, &y1, &w, &h);
-  int16_t x = -x1;  // align left edge at x=0
-  if (x < 0) x = 0;
-  tft.setCursor(x, y);
-  tft.print(text);
-}
+// Run-once flags
+static bool g_pendingSampleAfterIP = false;
+static bool g_sampleDone = false;
 
-static void displayQRPayload(const String &payload) {
-  // Initialize QR rendering and draw
-  qrcode.init();
-  qrcode.create(payload.c_str());
-}
-
-static void displayIP(const IPAddress &ip) {
-  tft.fillScreen(ST77XX_BLACK);
-  tftPrint("HiveSync", TFT_LINE_1, ST77XX_YELLOW);
-  tftPrint(ip.toString(), TFT_LINE_2, ST77XX_CYAN);
-}
+// Boot button hold thresholds (ms)
+#define CLEAR_PROV_HOLD_MS 2500
+#define CALIBRATE_HOLD_MS  6000
 
 static String buildQRPayload(const String &name, const String &pop, const char *transport) {
   // Mirrors WiFiProv.printQR() payload
@@ -79,15 +46,6 @@ static String cleanMacLastN(uint8_t n) {
   return mac.substring(mac.length() - n);
 }
 
-static void powerOnDisplay() {
-#ifdef TFT_I2C_POWER
-  pinMode(TFT_I2C_POWER, OUTPUT);
-  digitalWrite(TFT_I2C_POWER, HIGH);
-#endif
-  pinMode(TFT_BACKLITE, OUTPUT);
-  digitalWrite(TFT_BACKLITE, HIGH);
-}
-
 // Provisioning/WiFi event handler
 void SysProvEvent(arduino_event_t *sys_event) {
   switch (sys_event->event_id) {
@@ -95,7 +53,9 @@ void SysProvEvent(arduino_event_t *sys_event) {
       IPAddress ip(sys_event->event_info.got_ip.ip_info.ip.addr);
       Serial.print("Connected IP address: ");
       Serial.println(ip);
-      displayIP(ip);
+      display_showIP(ip);
+      // Mark ready to read sensors now that WiFi is connected
+      g_pendingSampleAfterIP = true;
       break;
     }
     case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
@@ -105,7 +65,7 @@ void SysProvEvent(arduino_event_t *sys_event) {
       Serial.println("Provisioning started. Use the app to provision.");
       // Show QR code on TFT
       String payload = buildQRPayload(g_deviceName, g_pop, "ble");
-      displayQRPayload(payload);
+      display_showQR(payload);
       // Also log the QR in serial (for convenience)
       WiFiProv.printQR(g_deviceName.c_str(), g_pop.c_str(), "ble");
       break;
@@ -133,20 +93,12 @@ void SysProvEvent(arduino_event_t *sys_event) {
   }
 }
 
-// Return true if D0 is held LOW for hold_ms at boot
-static bool bootLongPressToClear(uint32_t hold_ms = 2000) {
-  pinMode(0, INPUT_PULLUP);
-  // Require button to be already pressed (LOW) at boot
-  if (digitalRead(0) != LOW) return false;
-  uint32_t start = millis();
-  while (millis() - start < hold_ms) {
-    if (digitalRead(0) != LOW) {
-      return false;  // released before hold time
-    }
-    delay(10);
-  }
-  return true;  // held long enough
+// Return true if D0 is held for hold_ms at boot
+static bool bootLongPressToClear(uint32_t hold_ms = CLEAR_PROV_HOLD_MS) {
+  return buttons_measureHoldMs(BOOT_BTN_PIN, hold_ms + 100, BOOT_BTN_INPUT_MODE, BOOT_BTN_ACTIVE_LEVEL) >= hold_ms;
 }
+
+// Removed sensor helpers and calibration UI (moved to sensors module)
 
 void setup() {
   Serial.begin(115200);
@@ -160,27 +112,32 @@ void setup() {
   g_deviceName = String("HiveSync-") + mac4; // Device service name
   g_pop = String("Hive-") + mac6;           // Proof-of-possession
 
-  // Bring up TFT early with backlight
-  powerOnDisplay();
-  // Initialize SPI with variant pins
-  SPI.begin(SCK, MISO, MOSI, SS);
-  // Initialize ST7789. For this board it's 240x135; rotate for landscape
-  tft.init(135, 240);
-  tft.setRotation(3);
-  tft.fillScreen(ST77XX_BLACK);
-  tft.setTextWrap(false);
-  // Select FreeSans 12pt GFX font for all subsequent text
-  tft.setFont(&FreeSans12pt7b);
-  tftPrint("HiveSync", TFT_LINE_1, ST77XX_YELLOW);
-  tftPrint("Waiting...", TFT_LINE_2, ST77XX_WHITE);
+  // Bring up display
+  display_init();
+  display_printAt("HiveSync", TFT_LINE_1, ST77XX_YELLOW);
+  display_printAt("Waiting...", TFT_LINE_2, ST77XX_WHITE);
+  // Init battery monitor and draw overlay early
+  battery_init();
+  display_drawBatteryTopRight();
 
-  // Option on boot: long-press D0 to clear provisioning
+  // Init sensors (HX711 + calibration)
+  sensors_init();
+
+  // Configure button pull modes up-front
+  buttons_setupPins();
+
+  // Boot button actions: hold for clear or calibrate
   bool resetProv = false;
-  if (bootLongPressToClear(2500)) {
+  uint32_t heldCal = buttons_measureHoldMs(CAL_BTN_PIN, 9000, CAL_BTN_INPUT_MODE, CAL_BTN_ACTIVE_LEVEL);
+  if (heldCal >= CALIBRATE_HOLD_MS) {
+    Serial.println("Entering HX711 calibration mode (long hold)");
+    sensors_runHX711Calibration();
+  } else if (bootLongPressToClear(CLEAR_PROV_HOLD_MS)) {
     resetProv = true;
-    tft.fillScreen(ST77XX_BLACK);
-    tftPrint("HiveSync", TFT_LINE_1, ST77XX_YELLOW);
-    tftPrint("Clearing provisioning...", TFT_LINE_2, ST77XX_RED);
+    display_fillScreen(ST77XX_BLACK);
+    display_printAt("HiveSync", TFT_LINE_1, ST77XX_YELLOW);
+    display_printAt("Clearing provisioning...", TFT_LINE_2, ST77XX_RED);
+    display_drawBatteryTopRight();
     Serial.println("Long press detected on D0: clearing provisioning");
     delay(300);
   }
@@ -205,5 +162,75 @@ void setup() {
 }
 
 void loop() {
-  delay(100);
+  // After WiFi got IP, perform one sensor read then deep sleep
+  if (g_pendingSampleAfterIP && !g_sampleDone) {
+    g_sampleDone = true;
+    float tempC = NAN;
+    bool ok = sensors_readDS18B20C(tempC);
+    if (ok) {
+      Serial.printf("DS18B20 temperature: %.2f C\n", tempC);
+    } else {
+      Serial.println("No DS18B20 detected or read failed.");
+    }
+
+    long hxRaw = 0;
+    bool hxHasUnits = false;
+    float hxUnits = 0.0f;
+    bool hxOK = sensors_readHX711(hxRaw, hxHasUnits, hxUnits, 10);
+    char weightLine[40];
+    if (hxOK) {
+      if (hxHasUnits) {
+        snprintf(weightLine, sizeof(weightLine), "Wt: %.2f %s", hxUnits, HX711_UNITS_LABEL);
+        Serial.printf("HX711: %.2f %s (raw %ld)\n", hxUnits, HX711_UNITS_LABEL, hxRaw);
+      } else {
+        snprintf(weightLine, sizeof(weightLine), "Wt raw: %ld", hxRaw);
+        Serial.printf("HX711 raw: %ld (calibrate to get units)\n", hxRaw);
+      }
+    } else {
+      snprintf(weightLine, sizeof(weightLine), "HX711 not ready");
+      Serial.println("HX711 not ready or not connected.");
+    }
+
+    // Optionally record/analyze 60s of audio into defined FFT bands
+    float bands[AUDIO_BANDS] = {0};
+    display_printAt("Audio: 60s capture...", TFT_LINE_5, ST77XX_WHITE);
+    bool audioOK = analyzeINMP441Bins60s(bands);
+    if (audioOK) {
+      // Print named bins in requested ranges
+      Serial.printf("s_bin098_146Hz: %.2f\n", bands[0]);
+      Serial.printf("s_bin146_195Hz: %.2f\n", bands[1]);
+      Serial.printf("s_bin195_244Hz: %.2f\n", bands[2]);
+      Serial.printf("s_bin244_293Hz: %.2f\n", bands[3]);
+      Serial.printf("s_bin293_342Hz: %.2f\n", bands[4]);
+      Serial.printf("s_bin342_391Hz: %.2f\n", bands[5]);
+      Serial.printf("s_bin391_439Hz: %.2f\n", bands[6]);
+      Serial.printf("s_bin439_488Hz: %.2f\n", bands[7]);
+      Serial.printf("s_bin488_537Hz: %.2f\n", bands[8]);
+      Serial.printf("s_bin537_586Hz: %.2f\n", bands[9]);
+    } else {
+      Serial.println("I2S microphone not initialized (check pins/wiring). Skipping audio.");
+    }
+
+    // Show readings and sleep
+    if (ok) {
+      display_showSensorsAndSleep(tempC, weightLine);
+    } else {
+      display_fillScreen(ST77XX_BLACK);
+      display_printAt("HiveSync", TFT_LINE_1, ST77XX_YELLOW);
+      display_printAt("Temp sensor missing", TFT_LINE_2, ST77XX_RED);
+      display_printAt(String(weightLine), TFT_LINE_3, ST77XX_WHITE);
+      display_printAt("Sleeping 15 min...", TFT_LINE_4, ST77XX_CYAN);
+      display_drawBatteryTopRight();
+    }
+    const uint64_t sleep_us = 15ULL * 60ULL * 1000000ULL;
+    esp_sleep_enable_timer_wakeup(sleep_us);
+    // Power down peripherals where possible
+    sensors_powerDown();
+    display_backlight(false);
+    Serial.println("Entering deep sleep for 15 minutes...");
+    Serial.flush();
+    delay(250);
+    esp_deep_sleep_start();
+  }
+  delay(50);
 }
