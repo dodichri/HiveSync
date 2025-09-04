@@ -33,3 +33,5 @@ void display_showSensorsAndSleep(float tempC, const char* weightLine);
 
 // Overlay: draw battery percentage at top-right of line 1
 void display_drawBatteryTopRight();
+// Overlay: draw battery percentage and WiFi icon at top-right
+void display_drawBatteryAndWifiTopRight(uint16_t wifiColor);
