@@ -180,15 +180,15 @@ static bool bootLongPressToClear(uint32_t hold_ms = 2000) {
 // Read first DS18B20 temperature in Celsius, return true if success
 static bool readDS18B20C(float &outC) {
   ds18b20.begin();
-  /*int count = ds18b20.getDeviceCount();
+  int count = ds18b20.getDeviceCount();
   if (count <= 0) {
     return false;
-  }*/
+  }
   ds18b20.requestTemperatures();
   float t = ds18b20.getTempCByIndex(0);
-  /*if (t == DEVICE_DISCONNECTED_C) {
+  if (t == DEVICE_DISCONNECTED_C) {
     return false;
-  }*/
+  }
   outC = t;
   return true;
 }
