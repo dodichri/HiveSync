@@ -62,9 +62,8 @@ void display_drawBatteryTopRight() {
   }
 
   char buf[24];
-  // Compact format to fit alongside title
-  // Example: 87% 4.09V
-  snprintf(buf, sizeof(buf), "%.0f%% %.2fV", pct, volt);
+  // Show only battery percentage, e.g., "87%"
+  snprintf(buf, sizeof(buf), "%.0f%%", pct);
 
   // Measure text bounds for right alignment at screen width 240
   const int16_t baselineY = TFT_LINE_1;
@@ -110,4 +109,3 @@ void display_showSensorsAndSleep(float tempC, const char* weightLine) {
   display_printAt("Sleeping 15 min...", TFT_LINE_4, ST77XX_CYAN);
   display_drawBatteryTopRight();
 }
-

@@ -30,6 +30,5 @@ void display_showQR(const String &payload);
 void display_showIP(const IPAddress &ip);
 void display_showSensorsAndSleep(float tempC, const char* weightLine);
 
-// Overlay: draw battery percent/voltage at top-right of line 1
+// Overlay: draw battery percentage at top-right of line 1
 void display_drawBatteryTopRight();
-
