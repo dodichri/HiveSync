@@ -10,6 +10,11 @@
 // Use Adafruit GFX FreeFont: FreeSans12pt7b
 #include <Fonts/FreeSans12pt7b.h>
 
+// DS18B20 temp sensor
+#include <OneWire.h>
+#include <DallasTemperature.h>
+#include "esp_sleep.h"
+
 // Define y-coordinates for TFT text lines
 // Keep exact values used throughout to preserve layout
 #define TFT_LINE_1  18
@@ -30,6 +35,19 @@ QRcode_ST7789 qrcode(&tft);
 // Globals for device identity
 String g_deviceName;  // HiveSync-<last4>
 String g_pop;         // Hive-<last6>
+
+// Run-once flags
+static bool g_pendingSampleAfterIP = false;
+static bool g_sampleDone = false;
+
+// DS18B20 configuration
+#ifndef DS18B20_PIN
+// Default to Feather ESP32-S3 user pin D9. Change as needed.
+#define DS18B20_PIN 9
+#endif
+
+OneWire oneWire(DS18B20_PIN);
+DallasTemperature ds18b20(&oneWire);
 
 // Left-align text at the display's left edge (no centering)
 static void tftPrint(const String &text, int16_t y, uint16_t color = ST77XX_WHITE) {
@@ -55,6 +73,15 @@ static void displayIP(const IPAddress &ip) {
   tft.fillScreen(ST77XX_BLACK);
   tftPrint("HiveSync", TFT_LINE_1, ST77XX_YELLOW);
   tftPrint(ip.toString(), TFT_LINE_2, ST77XX_CYAN);
+}
+
+static void displayTempAndSleep(float tempC) {
+  tft.fillScreen(ST77XX_BLACK);
+  tftPrint("HiveSync", TFT_LINE_1, ST77XX_YELLOW);
+  char buf[32];
+  snprintf(buf, sizeof(buf), "Temp: %.2f C", tempC);
+  tftPrint(String(buf), TFT_LINE_2, ST77XX_WHITE);
+  tftPrint("Sleeping 15 min...", TFT_LINE_3, ST77XX_CYAN);
 }
 
 static String buildQRPayload(const String &name, const String &pop, const char *transport) {
@@ -96,6 +123,8 @@ void SysProvEvent(arduino_event_t *sys_event) {
       Serial.print("Connected IP address: ");
       Serial.println(ip);
       displayIP(ip);
+      // Mark ready to read sensors now that WiFi is connected
+      g_pendingSampleAfterIP = true;
       break;
     }
     case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
@@ -146,6 +175,22 @@ static bool bootLongPressToClear(uint32_t hold_ms = 2000) {
     delay(10);
   }
   return true;  // held long enough
+}
+
+// Read first DS18B20 temperature in Celsius, return true if success
+static bool readDS18B20C(float &outC) {
+  ds18b20.begin();
+  /*int count = ds18b20.getDeviceCount();
+  if (count <= 0) {
+    return false;
+  }*/
+  ds18b20.requestTemperatures();
+  float t = ds18b20.getTempCByIndex(0);
+  /*if (t == DEVICE_DISCONNECTED_C) {
+    return false;
+  }*/
+  outC = t;
+  return true;
 }
 
 void setup() {
@@ -205,5 +250,26 @@ void setup() {
 }
 
 void loop() {
-  delay(100);
+  // After WiFi got IP, perform one sensor read then deep sleep
+  if (g_pendingSampleAfterIP && !g_sampleDone) {
+    g_sampleDone = true;
+    float tempC = NAN;
+    bool ok = readDS18B20C(tempC);
+    if (ok) {
+      Serial.printf("DS18B20 temperature: %.2f C\n", tempC);
+      displayTempAndSleep(tempC);
+    } else {
+      Serial.println("No DS18B20 detected or read failed.");
+      tft.fillScreen(ST77XX_BLACK);
+      tftPrint("HiveSync", TFT_LINE_1, ST77XX_YELLOW);
+      tftPrint("No sensor found", TFT_LINE_2, ST77XX_RED);
+    }
+    const uint64_t sleep_us = 15ULL * 60ULL * 1000000ULL;
+    esp_sleep_enable_timer_wakeup(sleep_us);
+    Serial.println("Entering deep sleep for 15 minutes...");
+    Serial.flush();
+    delay(250);
+    esp_deep_sleep_start();
+  }
+  delay(50);
 }
