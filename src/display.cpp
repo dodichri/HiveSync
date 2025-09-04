@@ -4,6 +4,7 @@
 #include <qrcode_st7789.h>
 #include <Fonts/FreeSans12pt7b.h>
 #include "battery.h"
+#include "theme.h"
 
 #ifndef TFT_CS
 #error "Display requires a board variant defining TFT pins (TFT_CS/DC/RST/BACKLITE)."
@@ -77,9 +78,9 @@ void display_drawBatteryTopRight() {
   tft.fillRect(bx - 1, by - 1, bw + 2, bh + 2, ST77XX_BLACK);
 
   // Color by level for quick glance
-  uint16_t color = ST77XX_GREEN;
-  if (pct <= 20.0f) color = ST77XX_RED;
-  else if (pct <= 40.0f) color = ST77XX_YELLOW;
+  uint16_t color = ST77XX_GREEN;               // high
+  if (pct <= 20.0f) color = ST77XX_RED;        // low
+  else if (pct <= 40.0f) color = ST77XX_YELLOW;// medium
 
   tft.setTextColor(color);
   tft.setCursor(targetX, baselineY);
@@ -94,18 +95,18 @@ void display_showQR(const String &payload) {
 
 void display_showIP(const IPAddress &ip) {
   tft.fillScreen(ST77XX_BLACK);
-  display_printAt("HiveSync", TFT_LINE_1, ST77XX_YELLOW);
-  display_printAt(ip.toString(), TFT_LINE_2, ST77XX_CYAN);
+  display_printAt("HiveSync", TFT_LINE_1, THEME_TEXT_BRAND);
+  display_printAt(ip.toString(), TFT_LINE_2, THEME_TEXT_ACCENT);
   display_drawBatteryTopRight();
 }
 
 void display_showSensorsAndSleep(float tempC, const char* weightLine) {
   tft.fillScreen(ST77XX_BLACK);
-  display_printAt("HiveSync", TFT_LINE_1, ST77XX_YELLOW);
+  display_printAt("HiveSync", TFT_LINE_1, THEME_TEXT_BRAND);
   char buf[32];
   snprintf(buf, sizeof(buf), "Temp: %.2f C", tempC);
-  display_printAt(String(buf), TFT_LINE_2, ST77XX_WHITE);
-  display_printAt(String(weightLine), TFT_LINE_3, ST77XX_WHITE);
-  display_printAt("Sleeping 15 min...", TFT_LINE_4, ST77XX_CYAN);
+  display_printAt(String(buf), TFT_LINE_2, THEME_TEXT_PRIMARY);
+  display_printAt(String(weightLine), TFT_LINE_3, THEME_TEXT_PRIMARY);
+  display_printAt("Sleeping 15 min...", TFT_LINE_4, THEME_TEXT_ACCENT);
   display_drawBatteryTopRight();
 }

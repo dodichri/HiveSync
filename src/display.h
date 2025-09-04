@@ -1,4 +1,5 @@
 // Display utilities for Adafruit ST7789 + QR rendering
+#include "theme.h"
 #pragma once
 
 #include <Arduino.h>
@@ -23,7 +24,7 @@ void display_backlight(bool on);
 // Simple wrappers
 void display_fillScreen(uint16_t color);
 void display_fillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color);
-void display_printAt(const String &text, int16_t y, uint16_t color = ST77XX_WHITE);
+void display_printAt(const String &text, int16_t y, uint16_t color = THEME_TEXT_PRIMARY);
 
 // Composed views
 void display_showQR(const String &payload);

@@ -7,6 +7,7 @@
 
 #include "buttons.h"
 #include "display.h"
+#include "theme.h"
 
 static OneWire oneWire(DS18B20_PIN);
 static DallasTemperature ds18b20(&oneWire);
@@ -105,9 +106,9 @@ bool sensors_readHX711(long &outRaw, bool &hasUnits, float &outUnits, int sample
 
 bool sensors_runHX711Calibration() {
   display_fillScreen(ST77XX_BLACK);
-  display_printAt("HiveSync", TFT_LINE_1, ST77XX_YELLOW);
-  display_printAt("Calibrate HX711", TFT_LINE_2, ST77XX_WHITE);
-  display_printAt("Release button...", TFT_LINE_3, ST77XX_CYAN);
+  display_printAt("HiveSync", TFT_LINE_1, THEME_TEXT_BRAND);
+  display_printAt("Calibrate HX711", TFT_LINE_2, THEME_TEXT_PRIMARY);
+  display_printAt("Release button...", TFT_LINE_3, THEME_TEXT_ACCENT);
   display_drawBatteryTopRight();
 
   pinMode(CAL_BTN_PIN, CAL_BTN_INPUT_MODE);
@@ -116,15 +117,15 @@ bool sensors_runHX711Calibration() {
 
   // Step 1: Tare (offset)
   display_fillScreen(ST77XX_BLACK);
-  display_printAt("Cal: Step 1/2", TFT_LINE_1, ST77XX_YELLOW);
-  display_printAt("Remove all weight", TFT_LINE_2, ST77XX_WHITE);
-  display_printAt("Press to zero", TFT_LINE_3, ST77XX_CYAN);
+  display_printAt("Cal: Step 1/2", TFT_LINE_1, THEME_TEXT_BRAND);
+  display_printAt("Remove all weight", TFT_LINE_2, THEME_TEXT_PRIMARY);
+  display_printAt("Press to zero", TFT_LINE_3, THEME_TEXT_ACCENT);
   display_drawBatteryTopRight();
   buttons_waitPress(CAL_BTN_PIN, CAL_BTN_ACTIVE_LEVEL);
   buttons_waitRelease(CAL_BTN_PIN, CAL_BTN_ACTIVE_LEVEL);
   if (!hx711.wait_ready_timeout(2000)) {
     display_fillScreen(ST77XX_BLACK);
-    display_printAt("HX711 not ready", TFT_LINE_2, ST77XX_RED);
+    display_printAt("HX711 not ready", TFT_LINE_2, THEME_TEXT_ERROR);
     display_drawBatteryTopRight();
     delay(1200);
     return false;
@@ -136,11 +137,11 @@ bool sensors_runHX711Calibration() {
   pinMode(SEL_BTN_PIN, SEL_BTN_INPUT_MODE);
   float selWeight = HX711_CAL_WEIGHT;
   display_fillScreen(ST77XX_BLACK);
-  display_printAt("Cal: Step 2/2", TFT_LINE_1, ST77XX_YELLOW);
+  display_printAt("Cal: Step 2/2", TFT_LINE_1, THEME_TEXT_BRAND);
   char wline[40];
   snprintf(wline, sizeof(wline), "Weight: %.0f %s", selWeight, HX711_UNITS_LABEL);
-  display_printAt(String(wline), TFT_LINE_2, ST77XX_WHITE);
-  display_printAt("D2:+1  D1:OK", TFT_LINE_4, ST77XX_CYAN);
+  display_printAt(String(wline), TFT_LINE_2, THEME_TEXT_PRIMARY);
+  display_printAt("D2:+1  D1:OK", TFT_LINE_4, THEME_TEXT_ACCENT);
   display_drawBatteryTopRight();
   for (;;) {
     if (buttons_pressed(CAL_BTN_PIN, CAL_BTN_ACTIVE_LEVEL)) {
@@ -152,7 +153,7 @@ bool sensors_runHX711Calibration() {
       if (selWeight < 1.0f) selWeight = 1.0f;
       display_fillRect(0, TFT_LINE_2 - 20, 240, 32, ST77XX_BLACK);
       snprintf(wline, sizeof(wline), "Weight: %.0f %s", selWeight, HX711_UNITS_LABEL);
-      display_printAt(String(wline), TFT_LINE_2, ST77XX_WHITE);
+      display_printAt(String(wline), TFT_LINE_2, THEME_TEXT_PRIMARY);
       Serial.printf("Calibration weight set: %.0f %s\n", selWeight, HX711_UNITS_LABEL);
       buttons_waitRelease(SEL_BTN_PIN, SEL_BTN_ACTIVE_LEVEL);
       delay(50);
@@ -161,7 +162,7 @@ bool sensors_runHX711Calibration() {
   }
   if (!hx711.wait_ready_timeout(3000)) {
     display_fillScreen(ST77XX_BLACK);
-    display_printAt("HX711 not ready", TFT_LINE_2, ST77XX_RED);
+    display_printAt("HX711 not ready", TFT_LINE_2, THEME_TEXT_ERROR);
     display_drawBatteryTopRight();
     delay(1200);
     return false;
@@ -185,10 +186,10 @@ bool sensors_runHX711Calibration() {
   char res3[40];
   snprintf(res3, sizeof(res3), "Reads: %.1f %s", check, HX711_UNITS_LABEL);
   display_fillScreen(ST77XX_BLACK);
-  display_printAt("Saved calibration", TFT_LINE_1, ST77XX_YELLOW);
-  display_printAt(String(res1), TFT_LINE_2, ST77XX_WHITE);
-  display_printAt(String(res2), TFT_LINE_3, ST77XX_WHITE);
-  display_printAt(String(res3), TFT_LINE_4, ST77XX_CYAN);
+  display_printAt("Saved calibration", TFT_LINE_1, THEME_TEXT_BRAND);
+  display_printAt(String(res1), TFT_LINE_2, THEME_TEXT_PRIMARY);
+  display_printAt(String(res2), TFT_LINE_3, THEME_TEXT_PRIMARY);
+  display_printAt(String(res3), TFT_LINE_4, THEME_TEXT_ACCENT);
   display_drawBatteryTopRight();
   delay(1500);
   return true;
@@ -197,4 +198,3 @@ bool sensors_runHX711Calibration() {
 void sensors_powerDown() {
   hx711.power_down();
 }
-

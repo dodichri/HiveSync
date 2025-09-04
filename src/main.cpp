@@ -5,6 +5,7 @@
 #include "esp_sleep.h"
 
 #include "display.h"
+#include "theme.h"
 #include "buttons.h"
 #include "sensors.h"
 // Battery fuel gauge
@@ -114,8 +115,8 @@ void setup() {
 
   // Bring up display
   display_init();
-  display_printAt("HiveSync", TFT_LINE_1, ST77XX_YELLOW);
-  display_printAt("Waiting...", TFT_LINE_2, ST77XX_WHITE);
+  display_printAt("HiveSync", TFT_LINE_1, THEME_TEXT_BRAND);
+  display_printAt("Waiting...", TFT_LINE_2, THEME_TEXT_PRIMARY);
   // Init battery monitor and draw overlay early
   battery_init();
   display_drawBatteryTopRight();
@@ -135,8 +136,8 @@ void setup() {
   } else if (bootLongPressToClear(CLEAR_PROV_HOLD_MS)) {
     resetProv = true;
     display_fillScreen(ST77XX_BLACK);
-    display_printAt("HiveSync", TFT_LINE_1, ST77XX_YELLOW);
-    display_printAt("Clearing provisioning...", TFT_LINE_2, ST77XX_RED);
+    display_printAt("HiveSync", TFT_LINE_1, THEME_TEXT_BRAND);
+    display_printAt("Clearing provisioning...", TFT_LINE_2, THEME_TEXT_ERROR);
     display_drawBatteryTopRight();
     Serial.println("Long press detected on D0: clearing provisioning");
     delay(300);
@@ -193,7 +194,7 @@ void loop() {
 
     // Optionally record/analyze 60s of audio into defined FFT bands
     float bands[AUDIO_BANDS] = {0};
-    display_printAt("Audio: 60s capture...", TFT_LINE_5, ST77XX_WHITE);
+      display_printAt("Audio: 60s capture...", TFT_LINE_5, THEME_TEXT_PRIMARY);
     bool audioOK = analyzeINMP441Bins60s(bands);
     if (audioOK) {
       // Print named bins in requested ranges
@@ -216,10 +217,10 @@ void loop() {
       display_showSensorsAndSleep(tempC, weightLine);
     } else {
       display_fillScreen(ST77XX_BLACK);
-      display_printAt("HiveSync", TFT_LINE_1, ST77XX_YELLOW);
-      display_printAt("Temp sensor missing", TFT_LINE_2, ST77XX_RED);
-      display_printAt(String(weightLine), TFT_LINE_3, ST77XX_WHITE);
-      display_printAt("Sleeping 15 min...", TFT_LINE_4, ST77XX_CYAN);
+      display_printAt("HiveSync", TFT_LINE_1, THEME_TEXT_BRAND);
+      display_printAt("Temp sensor missing", TFT_LINE_2, THEME_TEXT_ERROR);
+      display_printAt(String(weightLine), TFT_LINE_3, THEME_TEXT_PRIMARY);
+      display_printAt("Sleeping 15 min...", TFT_LINE_4, THEME_TEXT_ACCENT);
       display_drawBatteryTopRight();
     }
     const uint64_t sleep_us = 15ULL * 60ULL * 1000000ULL;
