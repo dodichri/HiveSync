@@ -19,6 +19,9 @@
 // NVS key/value storage
 #include <Preferences.h>
 
+// INMP441 I2S microphone + FFT
+#include "audio_inmp441.h"
+
 // Define y-coordinates for TFT text lines
 // Keep exact values used throughout to preserve layout
 #define TFT_LINE_1  18
@@ -523,6 +526,26 @@ void loop() {
     } else {
       snprintf(weightLine, sizeof(weightLine), "HX711 not ready");
       Serial.println("HX711 not ready or not connected.");
+    }
+
+    // Optionally record/analyze 60s of audio into defined FFT bands
+    float bands[AUDIO_BANDS] = {0};
+    tftPrint("Audio: 60s capture...", TFT_LINE_5, ST77XX_WHITE);
+    bool audioOK = analyzeINMP441Bins60s(bands);
+    if (audioOK) {
+      // Print named bins in requested ranges
+      Serial.printf("s_bin098_146Hz: %.2f\n", bands[0]);
+      Serial.printf("s_bin146_195Hz: %.2f\n", bands[1]);
+      Serial.printf("s_bin195_244Hz: %.2f\n", bands[2]);
+      Serial.printf("s_bin244_293Hz: %.2f\n", bands[3]);
+      Serial.printf("s_bin293_342Hz: %.2f\n", bands[4]);
+      Serial.printf("s_bin342_391Hz: %.2f\n", bands[5]);
+      Serial.printf("s_bin391_439Hz: %.2f\n", bands[6]);
+      Serial.printf("s_bin439_488Hz: %.2f\n", bands[7]);
+      Serial.printf("s_bin488_537Hz: %.2f\n", bands[8]);
+      Serial.printf("s_bin537_586Hz: %.2f\n", bands[9]);
+    } else {
+      Serial.println("I2S microphone not initialized (check pins/wiring). Skipping audio.");
     }
 
     // Show readings and sleep
