@@ -16,6 +16,8 @@
 #include "esp_sleep.h"
 // HX711 weight sensor
 #include <HX711.h>
+// NVS key/value storage
+#include <Preferences.h>
 
 // Define y-coordinates for TFT text lines
 // Keep exact values used throughout to preserve layout
@@ -61,10 +63,28 @@ DallasTemperature ds18b20(&oneWire);
 // Optional calibration: define HX711_SCALE (units per ADC count) and HX711_OFFSET (raw zero)
 // Example: -DHX711_SCALE=2280.0 -DHX711_OFFSET=8390000 -DHX711_UNITS_LABEL=\"g\"
 #ifndef HX711_UNITS_LABEL
-#define HX711_UNITS_LABEL "g"
+#define HX711_UNITS_LABEL "lbs"
 #endif
 
 static HX711 hx711;
+static Preferences prefs;
+
+// Calibration storage
+struct HX711Cal {
+  bool loaded;
+  long offset;
+  float scale;
+};
+static HX711Cal g_hxCal = {false, 0, 0.0f};
+
+// Calibration constants
+#ifndef HX711_CAL_WEIGHT
+#define HX711_CAL_WEIGHT 0.0f  // known weight value in HX711_UNITS_LABEL units
+#endif
+
+// Boot button hold thresholds (ms)
+#define CLEAR_PROV_HOLD_MS 2500
+#define CALIBRATE_HOLD_MS  6000
 
 // Left-align text at the display's left edge (no centering)
 static void tftPrint(const String &text, int16_t y, uint16_t color = ST77XX_WHITE) {
@@ -133,6 +153,65 @@ static void powerOnDisplay() {
   digitalWrite(TFT_BACKLITE, HIGH);
 }
 
+// Button pins
+#ifndef BOOT_BTN_PIN
+#define BOOT_BTN_PIN 0  // D0: boot/clear provisioning
+#endif
+#ifndef CAL_BTN_PIN
+#ifdef D1
+#define CAL_BTN_PIN D1  // Use D1 for calibration
+#else
+#define CAL_BTN_PIN 1   // fallback to GPIO1 if D1 alias not present
+#endif
+#endif
+
+// Increment/select button (D2) for calibration weight
+#ifndef SEL_BTN_PIN
+#ifdef D2
+#define SEL_BTN_PIN D2
+#else
+#define SEL_BTN_PIN 2   // fallback to GPIO2 if D2 alias not present
+#endif
+#endif
+
+// Button electrical configuration
+#ifndef BOOT_BTN_ACTIVE_LEVEL
+#define BOOT_BTN_ACTIVE_LEVEL LOW
+#endif
+#ifndef BOOT_BTN_INPUT_MODE
+#define BOOT_BTN_INPUT_MODE INPUT_PULLUP
+#endif
+
+#ifndef CAL_BTN_ACTIVE_LEVEL
+#define CAL_BTN_ACTIVE_LEVEL HIGH   // D1 uses pulldown; pressed ties HIGH
+#endif
+#ifndef CAL_BTN_INPUT_MODE
+#define CAL_BTN_INPUT_MODE INPUT_PULLDOWN
+#endif
+
+#ifndef SEL_BTN_ACTIVE_LEVEL
+#define SEL_BTN_ACTIVE_LEVEL HIGH   // D2 uses pulldown; pressed ties HIGH
+#endif
+#ifndef SEL_BTN_INPUT_MODE
+#define SEL_BTN_INPUT_MODE INPUT_PULLDOWN
+#endif
+
+// Generic button helpers
+static inline bool btnPressed(uint8_t pin, int activeLevel) { return digitalRead(pin) == activeLevel; }
+static void waitBtnRelease(uint8_t pin, int activeLevel) { while (btnPressed(pin, activeLevel)) delay(10); }
+static void waitBtnPress(uint8_t pin, int activeLevel) { while (!btnPressed(pin, activeLevel)) delay(10); }
+
+// Measure how long a button is held at startup (up to max_ms)
+static uint32_t measureHoldMs(uint8_t pin, uint32_t max_ms, uint8_t inputMode, int activeLevel) {
+  pinMode(pin, inputMode);
+  if (!btnPressed(pin, activeLevel)) return 0;
+  uint32_t start = millis();
+  while (btnPressed(pin, activeLevel) && (millis() - start) < max_ms) {
+    delay(10);
+  }
+  return millis() - start;
+}
+
 // Provisioning/WiFi event handler
 void SysProvEvent(arduino_event_t *sys_event) {
   switch (sys_event->event_id) {
@@ -181,18 +260,8 @@ void SysProvEvent(arduino_event_t *sys_event) {
 }
 
 // Return true if D0 is held LOW for hold_ms at boot
-static bool bootLongPressToClear(uint32_t hold_ms = 2000) {
-  pinMode(0, INPUT_PULLUP);
-  // Require button to be already pressed (LOW) at boot
-  if (digitalRead(0) != LOW) return false;
-  uint32_t start = millis();
-  while (millis() - start < hold_ms) {
-    if (digitalRead(0) != LOW) {
-      return false;  // released before hold time
-    }
-    delay(10);
-  }
-  return true;  // held long enough
+static bool bootLongPressToClear(uint32_t hold_ms = CLEAR_PROV_HOLD_MS) {
+  return measureHoldMs(BOOT_BTN_PIN, hold_ms + 100, BOOT_BTN_INPUT_MODE, BOOT_BTN_ACTIVE_LEVEL) >= hold_ms;
 }
 
 // Read first DS18B20 temperature in Celsius, return true if success
@@ -221,14 +290,134 @@ static bool readHX711(long &outRaw, bool &hasUnits, float &outUnits, int samples
     return false;
   }
   outRaw = hx711.read_average(samples);
-#if defined(HX711_SCALE) && defined(HX711_OFFSET)
-  hx711.set_scale((float)HX711_SCALE);
-  hx711.set_offset((long)HX711_OFFSET);
-  outUnits = hx711.get_units(samples);
-  hasUnits = true;
-#else
-  hasUnits = false;
-#endif
+  if (g_hxCal.loaded) {
+    hx711.set_scale(g_hxCal.scale);
+    hx711.set_offset(g_hxCal.offset);
+    outUnits = hx711.get_units(samples);
+    hasUnits = true;
+  } else {
+  #if defined(HX711_SCALE) && defined(HX711_OFFSET)
+    hx711.set_scale((float)HX711_SCALE);
+    hx711.set_offset((long)HX711_OFFSET);
+    outUnits = hx711.get_units(samples);
+    hasUnits = true;
+  #else
+    hasUnits = false;
+  #endif
+  }
+  return true;
+}
+
+// Load/store calibration from NVS
+static void loadHXCal() {
+  prefs.begin("hivesync", true);
+  bool hasOff = prefs.isKey("hx_off");
+  bool hasScl = prefs.isKey("hx_scl");
+  if (hasOff && hasScl) {
+    long long off = prefs.getLong("hx_off", 0);
+    float scl = prefs.getFloat("hx_scl", 0.0f);
+    if (scl != 0.0f) {
+      g_hxCal.loaded = true;
+      g_hxCal.offset = (long)off;
+      g_hxCal.scale = scl;
+    }
+  }
+  prefs.end();
+}
+
+static void saveHXCal(long offset, float scale) {
+  prefs.begin("hivesync", false);
+  prefs.putLong("hx_off", (long long)offset);
+  prefs.putFloat("hx_scl", scale);
+  prefs.end();
+  g_hxCal.loaded = true;
+  g_hxCal.offset = offset;
+  g_hxCal.scale = scale;
+}
+
+// Simple two-step calibration UI using the boot button
+static bool runHX711Calibration() {
+  tft.fillScreen(ST77XX_BLACK);
+  tftPrint("HiveSync", TFT_LINE_1, ST77XX_YELLOW);
+  tftPrint("Calibrate HX711", TFT_LINE_2, ST77XX_WHITE);
+  tftPrint("Release button...", TFT_LINE_3, ST77XX_CYAN);
+  // Ensure correct input mode for calibration button
+  pinMode(CAL_BTN_PIN, CAL_BTN_INPUT_MODE);
+  waitBtnRelease(CAL_BTN_PIN, CAL_BTN_ACTIVE_LEVEL);
+  delay(150);
+
+  // Step 1: Tare (offset)
+  tft.fillScreen(ST77XX_BLACK);
+  tftPrint("Cal: Step 1/2", TFT_LINE_1, ST77XX_YELLOW);
+  tftPrint("Remove all weight", TFT_LINE_2, ST77XX_WHITE);
+  tftPrint("Press to zero", TFT_LINE_3, ST77XX_CYAN);
+  waitBtnPress(CAL_BTN_PIN, CAL_BTN_ACTIVE_LEVEL);
+  waitBtnRelease(CAL_BTN_PIN, CAL_BTN_ACTIVE_LEVEL);
+  if (!hx711.wait_ready_timeout(2000)) {
+    tft.fillScreen(ST77XX_BLACK);
+    tftPrint("HX711 not ready", TFT_LINE_2, ST77XX_RED);
+    delay(1200);
+    return false;
+  }
+  hx711.tare(15);
+  long offset = hx711.get_offset();
+
+  // Step 2: Known weight (user selects with D2)
+  pinMode(SEL_BTN_PIN, SEL_BTN_INPUT_MODE);
+  float selWeight = HX711_CAL_WEIGHT;
+  tft.fillScreen(ST77XX_BLACK);
+  tftPrint("Cal: Step 2/2", TFT_LINE_1, ST77XX_YELLOW);
+  char wline[40];
+  snprintf(wline, sizeof(wline), "Weight: %.0f %s", selWeight, HX711_UNITS_LABEL);
+  tftPrint(String(wline), TFT_LINE_2, ST77XX_WHITE);
+  tftPrint("D2:+1  D1:OK", TFT_LINE_4, ST77XX_CYAN);
+  for (;;) {
+    if (btnPressed(CAL_BTN_PIN, CAL_BTN_ACTIVE_LEVEL)) {
+      waitBtnRelease(CAL_BTN_PIN, CAL_BTN_ACTIVE_LEVEL);
+      break;
+    }
+    if (btnPressed(SEL_BTN_PIN, SEL_BTN_ACTIVE_LEVEL)) {
+      selWeight += 1.0f;
+      if (selWeight < 1.0f) selWeight = 1.0f;
+      tft.fillRect(0, TFT_LINE_2 - 20, 240, 32, ST77XX_BLACK);
+      snprintf(wline, sizeof(wline), "Weight: %.0f %s", selWeight, HX711_UNITS_LABEL);
+      tftPrint(String(wline), TFT_LINE_2, ST77XX_WHITE);
+      Serial.printf("Calibration weight set: %.0f %s\n", selWeight, HX711_UNITS_LABEL);
+      waitBtnRelease(SEL_BTN_PIN, SEL_BTN_ACTIVE_LEVEL);
+      delay(50);
+    }
+    delay(15);
+  }
+  if (!hx711.wait_ready_timeout(3000)) {
+    tft.fillScreen(ST77XX_BLACK);
+    tftPrint("HX711 not ready", TFT_LINE_2, ST77XX_RED);
+    delay(1200);
+    return false;
+  }
+  long raw = hx711.read_average(15);
+  if (selWeight <= 0.0f) selWeight = 1.0f;
+  float scale = (raw - (float)offset) / selWeight;
+  if (scale == 0.0f) scale = 1.0f;
+  hx711.set_offset(offset);
+  hx711.set_scale(scale);
+  float check = hx711.get_units(10);
+
+  // Save to NVS
+  saveHXCal(offset, scale);
+
+  // Show result
+  char res1[40];
+  snprintf(res1, sizeof(res1), "Zero: %ld", offset);
+  char res2[40];
+  snprintf(res2, sizeof(res2), "Scale: %.3f cnt/%s", scale, HX711_UNITS_LABEL);
+  char res3[40];
+  snprintf(res3, sizeof(res3), "Reads: %.1f %s", check, HX711_UNITS_LABEL);
+  tft.fillScreen(ST77XX_BLACK);
+  tftPrint("Saved calibration", TFT_LINE_1, ST77XX_YELLOW);
+  tftPrint(String(res1), TFT_LINE_2, ST77XX_WHITE);
+  tftPrint(String(res2), TFT_LINE_3, ST77XX_WHITE);
+  tftPrint(String(res3), TFT_LINE_4, ST77XX_CYAN);
+  delay(1500);
   return true;
 }
 
@@ -260,10 +449,25 @@ void setup() {
 
   // Init HX711 pins early so readiness checks work
   hx711.begin(HX711_DOUT_PIN, HX711_SCK_PIN);
+  // Load saved calibration if present
+  loadHXCal();
+  if (g_hxCal.loaded) {
+    hx711.set_offset(g_hxCal.offset);
+    hx711.set_scale(g_hxCal.scale);
+  }
 
-  // Option on boot: long-press D0 to clear provisioning
+  // Configure button pull modes up-front
+  pinMode(BOOT_BTN_PIN, BOOT_BTN_INPUT_MODE);
+  pinMode(CAL_BTN_PIN, CAL_BTN_INPUT_MODE);
+  pinMode(SEL_BTN_PIN, SEL_BTN_INPUT_MODE);
+
+  // Boot button actions: hold for clear or calibrate
   bool resetProv = false;
-  if (bootLongPressToClear(2500)) {
+  uint32_t heldCal = measureHoldMs(CAL_BTN_PIN, 9000, CAL_BTN_INPUT_MODE, CAL_BTN_ACTIVE_LEVEL);
+  if (heldCal >= CALIBRATE_HOLD_MS) {
+    Serial.println("Entering HX711 calibration mode (long hold)");
+    runHX711Calibration();
+  } else if (bootLongPressToClear(CLEAR_PROV_HOLD_MS)) {
     resetProv = true;
     tft.fillScreen(ST77XX_BLACK);
     tftPrint("HiveSync", TFT_LINE_1, ST77XX_YELLOW);
