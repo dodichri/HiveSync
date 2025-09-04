@@ -9,6 +9,7 @@
 #include "sensors.h"
 // INMP441 I2S microphone + FFT
 #include "audio_inmp441.h"
+#include "beep_client.h"
 
 // Globals for device identity
 String g_deviceName;  // HiveSync-<last4>
@@ -203,6 +204,23 @@ void loop() {
       Serial.printf("s_bin537_586Hz: %.2f\n", bands[9]);
     } else {
       Serial.println("I2S microphone not initialized (check pins/wiring). Skipping audio.");
+    }
+
+    // Send to BEEP.nl API
+    {
+      bool sent = beep_sendReadings(
+          tempC,
+          ok,
+          hxOK,
+          hxHasUnits,
+          hxRaw,
+          hxUnits,
+          audioOK,
+          bands,
+          (size_t)AUDIO_BANDS);
+      if (!sent) {
+        Serial.println("Failed to send measurements to BEEP");
+      }
     }
 
     // Show readings and sleep
