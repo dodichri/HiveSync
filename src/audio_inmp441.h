@@ -2,17 +2,9 @@
 #pragma once
 
 #include <Arduino.h>
+#include "pins_config.h"
 
-// Configure I2S pins for INMP441 (override in platformio.ini build_flags)
-#ifndef I2S_WS_PIN
-#define I2S_WS_PIN  13   // LRCLK / WS
-#endif
-#ifndef I2S_SCK_PIN
-#define I2S_SCK_PIN  12  // BCLK / SCK
-#endif
-#ifndef I2S_SD_PIN
-#define I2S_SD_PIN   14  // DOUT from INMP441 -> SD
-#endif
+// I2S pins are defined in pins_config.h (override via build_flags)
 
 // Sample rate and FFT size
 #ifndef I2S_SAMPLE_RATE
@@ -32,4 +24,3 @@
 //  342-391, 391-439, 439-488, 488-537, 537-586
 // Returns true on success; false if I2S setup fails.
 bool analyzeINMP441Bins60s(float outBands[AUDIO_BANDS]);
-
