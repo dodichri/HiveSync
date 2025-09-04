@@ -2,19 +2,9 @@
 #pragma once
 
 #include <Arduino.h>
+#include "pins_config.h"
 
-// DS18B20 pin (override via build flags)
-#ifndef DS18B20_PIN
-#define DS18B20_PIN 9
-#endif
-
-// HX711 pins (override via build flags)
-#ifndef HX711_DOUT_PIN
-#define HX711_DOUT_PIN 10
-#endif
-#ifndef HX711_SCK_PIN
-#define HX711_SCK_PIN 11
-#endif
+// DS18B20 and HX711 pins are centralized in pins_config.h
 
 // Units label default
 #ifndef HX711_UNITS_LABEL
@@ -31,4 +21,3 @@ bool sensors_readDS18B20C(float &outC);
 bool sensors_readHX711(long &outRaw, bool &hasUnits, float &outUnits, int samples = 10);
 bool sensors_runHX711Calibration();
 void sensors_powerDown();
-
