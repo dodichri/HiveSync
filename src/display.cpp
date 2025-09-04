@@ -61,17 +61,16 @@ void display_showQR(const String &payload) {
 
 void display_showIP(const IPAddress &ip) {
   tft.fillScreen(ST77XX_BLACK);
-  display_printAt("HiveSync", TFT_LINE_1, ST77XX_YELLOW);
-  display_printAt(ip.toString(), TFT_LINE_2, ST77XX_CYAN);
+  display_printAt("HiveSync", TFT_LINE_1, COLOR_HIVE_YELLOW);
+  display_printAt(ip.toString(), TFT_LINE_2, COLOR_SIGNAL_BLUE);
 }
 
 void display_showSensorsAndSleep(float tempC, const char* weightLine) {
   tft.fillScreen(ST77XX_BLACK);
-  display_printAt("HiveSync", TFT_LINE_1, ST77XX_YELLOW);
+  display_printAt("HiveSync", TFT_LINE_1, COLOR_HIVE_YELLOW);
   char buf[32];
   snprintf(buf, sizeof(buf), "Temp: %.2f C", tempC);
-  display_printAt(String(buf), TFT_LINE_2, ST77XX_WHITE);
-  display_printAt(String(weightLine), TFT_LINE_3, ST77XX_WHITE);
-  display_printAt("Sleeping 15 min...", TFT_LINE_4, ST77XX_CYAN);
+  display_printAt(String(buf), TFT_LINE_2, COLOR_WHITE_SMOKE);
+  display_printAt(String(weightLine), TFT_LINE_3, COLOR_WHITE_SMOKE);
+  display_printAt("Sleeping 15 min...", TFT_LINE_4, COLOR_SIGNAL_BLUE);
 }
-
