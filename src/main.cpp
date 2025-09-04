@@ -14,6 +14,8 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include "esp_sleep.h"
+// HX711 weight sensor
+#include <HX711.h>
 
 // Define y-coordinates for TFT text lines
 // Keep exact values used throughout to preserve layout
@@ -49,6 +51,21 @@ static bool g_sampleDone = false;
 OneWire oneWire(DS18B20_PIN);
 DallasTemperature ds18b20(&oneWire);
 
+// HX711 configuration (override via build flags or here)
+#ifndef HX711_DOUT_PIN
+#define HX711_DOUT_PIN 10
+#endif
+#ifndef HX711_SCK_PIN
+#define HX711_SCK_PIN 11
+#endif
+// Optional calibration: define HX711_SCALE (units per ADC count) and HX711_OFFSET (raw zero)
+// Example: -DHX711_SCALE=2280.0 -DHX711_OFFSET=8390000 -DHX711_UNITS_LABEL=\"g\"
+#ifndef HX711_UNITS_LABEL
+#define HX711_UNITS_LABEL "g"
+#endif
+
+static HX711 hx711;
+
 // Left-align text at the display's left edge (no centering)
 static void tftPrint(const String &text, int16_t y, uint16_t color = ST77XX_WHITE) {
   tft.setTextColor(color);
@@ -75,13 +92,14 @@ static void displayIP(const IPAddress &ip) {
   tftPrint(ip.toString(), TFT_LINE_2, ST77XX_CYAN);
 }
 
-static void displayTempAndSleep(float tempC) {
+static void displaySensorsAndSleep(float tempC, const char* weightLine) {
   tft.fillScreen(ST77XX_BLACK);
   tftPrint("HiveSync", TFT_LINE_1, ST77XX_YELLOW);
   char buf[32];
   snprintf(buf, sizeof(buf), "Temp: %.2f C", tempC);
   tftPrint(String(buf), TFT_LINE_2, ST77XX_WHITE);
-  tftPrint("Sleeping 15 min...", TFT_LINE_3, ST77XX_CYAN);
+  tftPrint(String(weightLine), TFT_LINE_3, ST77XX_WHITE);
+  tftPrint("Sleeping 15 min...", TFT_LINE_4, ST77XX_CYAN);
 }
 
 static String buildQRPayload(const String &name, const String &pop, const char *transport) {
@@ -193,6 +211,27 @@ static bool readDS18B20C(float &outC) {
   return true;
 }
 
+// Read HX711. Returns true if sensor responded; outputs raw and, when calibrated, units.
+static bool readHX711(long &outRaw, bool &hasUnits, float &outUnits, int samples = 10) {
+  if (!hx711.is_ready()) {
+    // try to initialize and wait briefly
+    hx711.begin(HX711_DOUT_PIN, HX711_SCK_PIN);
+  }
+  if (!hx711.wait_ready_timeout(1000)) {
+    return false;
+  }
+  outRaw = hx711.read_average(samples);
+#if defined(HX711_SCALE) && defined(HX711_OFFSET)
+  hx711.set_scale((float)HX711_SCALE);
+  hx711.set_offset((long)HX711_OFFSET);
+  outUnits = hx711.get_units(samples);
+  hasUnits = true;
+#else
+  hasUnits = false;
+#endif
+  return true;
+}
+
 void setup() {
   Serial.begin(115200);
   delay(100);
@@ -218,6 +257,9 @@ void setup() {
   tft.setFont(&FreeSans12pt7b);
   tftPrint("HiveSync", TFT_LINE_1, ST77XX_YELLOW);
   tftPrint("Waiting...", TFT_LINE_2, ST77XX_WHITE);
+
+  // Init HX711 pins early so readiness checks work
+  hx711.begin(HX711_DOUT_PIN, HX711_SCK_PIN);
 
   // Option on boot: long-press D0 to clear provisioning
   bool resetProv = false;
@@ -257,15 +299,43 @@ void loop() {
     bool ok = readDS18B20C(tempC);
     if (ok) {
       Serial.printf("DS18B20 temperature: %.2f C\n", tempC);
-      displayTempAndSleep(tempC);
     } else {
       Serial.println("No DS18B20 detected or read failed.");
+    }
+
+    long hxRaw = 0;
+    bool hxHasUnits = false;
+    float hxUnits = 0.0f;
+    bool hxOK = readHX711(hxRaw, hxHasUnits, hxUnits, 10);
+    char weightLine[40];
+    if (hxOK) {
+      if (hxHasUnits) {
+        snprintf(weightLine, sizeof(weightLine), "Wt: %.2f %s", hxUnits, HX711_UNITS_LABEL);
+        Serial.printf("HX711: %.2f %s (raw %ld)\n", hxUnits, HX711_UNITS_LABEL, hxRaw);
+      } else {
+        snprintf(weightLine, sizeof(weightLine), "Wt raw: %ld", hxRaw);
+        Serial.printf("HX711 raw: %ld (calibrate to get units)\n", hxRaw);
+      }
+    } else {
+      snprintf(weightLine, sizeof(weightLine), "HX711 not ready");
+      Serial.println("HX711 not ready or not connected.");
+    }
+
+    // Show readings and sleep
+    if (ok) {
+      displaySensorsAndSleep(tempC, weightLine);
+    } else {
       tft.fillScreen(ST77XX_BLACK);
       tftPrint("HiveSync", TFT_LINE_1, ST77XX_YELLOW);
-      tftPrint("No sensor found", TFT_LINE_2, ST77XX_RED);
+      tftPrint("Temp sensor missing", TFT_LINE_2, ST77XX_RED);
+      tftPrint(String(weightLine), TFT_LINE_3, ST77XX_WHITE);
+      tftPrint("Sleeping 15 min...", TFT_LINE_4, ST77XX_CYAN);
     }
     const uint64_t sleep_us = 15ULL * 60ULL * 1000000ULL;
     esp_sleep_enable_timer_wakeup(sleep_us);
+    // Power down peripherals where possible
+    hx711.power_down();
+    digitalWrite(TFT_BACKLITE, LOW);
     Serial.println("Entering deep sleep for 15 minutes...");
     Serial.flush();
     delay(250);
