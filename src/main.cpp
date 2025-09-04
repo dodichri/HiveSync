@@ -7,6 +7,8 @@
 #include "display.h"
 #include "buttons.h"
 #include "sensors.h"
+// Battery fuel gauge
+#include "battery.h"
 // INMP441 I2S microphone + FFT
 #include "audio_inmp441.h"
 
@@ -114,6 +116,9 @@ void setup() {
   display_init();
   display_printAt("HiveSync", TFT_LINE_1, ST77XX_YELLOW);
   display_printAt("Waiting...", TFT_LINE_2, ST77XX_WHITE);
+  // Init battery monitor and draw overlay early
+  battery_init();
+  display_drawBatteryTopRight();
 
   // Init sensors (HX711 + calibration)
   sensors_init();
@@ -132,6 +137,7 @@ void setup() {
     display_fillScreen(ST77XX_BLACK);
     display_printAt("HiveSync", TFT_LINE_1, ST77XX_YELLOW);
     display_printAt("Clearing provisioning...", TFT_LINE_2, ST77XX_RED);
+    display_drawBatteryTopRight();
     Serial.println("Long press detected on D0: clearing provisioning");
     delay(300);
   }
@@ -214,6 +220,7 @@ void loop() {
       display_printAt("Temp sensor missing", TFT_LINE_2, ST77XX_RED);
       display_printAt(String(weightLine), TFT_LINE_3, ST77XX_WHITE);
       display_printAt("Sleeping 15 min...", TFT_LINE_4, ST77XX_CYAN);
+      display_drawBatteryTopRight();
     }
     const uint64_t sleep_us = 15ULL * 60ULL * 1000000ULL;
     esp_sleep_enable_timer_wakeup(sleep_us);
