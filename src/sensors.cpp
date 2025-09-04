@@ -108,6 +108,7 @@ bool sensors_runHX711Calibration() {
   display_printAt("HiveSync", TFT_LINE_1, ST77XX_YELLOW);
   display_printAt("Calibrate HX711", TFT_LINE_2, ST77XX_WHITE);
   display_printAt("Release button...", TFT_LINE_3, ST77XX_CYAN);
+  display_drawBatteryTopRight();
 
   pinMode(CAL_BTN_PIN, CAL_BTN_INPUT_MODE);
   buttons_waitRelease(CAL_BTN_PIN, CAL_BTN_ACTIVE_LEVEL);
@@ -118,11 +119,13 @@ bool sensors_runHX711Calibration() {
   display_printAt("Cal: Step 1/2", TFT_LINE_1, ST77XX_YELLOW);
   display_printAt("Remove all weight", TFT_LINE_2, ST77XX_WHITE);
   display_printAt("Press to zero", TFT_LINE_3, ST77XX_CYAN);
+  display_drawBatteryTopRight();
   buttons_waitPress(CAL_BTN_PIN, CAL_BTN_ACTIVE_LEVEL);
   buttons_waitRelease(CAL_BTN_PIN, CAL_BTN_ACTIVE_LEVEL);
   if (!hx711.wait_ready_timeout(2000)) {
     display_fillScreen(ST77XX_BLACK);
     display_printAt("HX711 not ready", TFT_LINE_2, ST77XX_RED);
+    display_drawBatteryTopRight();
     delay(1200);
     return false;
   }
@@ -138,6 +141,7 @@ bool sensors_runHX711Calibration() {
   snprintf(wline, sizeof(wline), "Weight: %.0f %s", selWeight, HX711_UNITS_LABEL);
   display_printAt(String(wline), TFT_LINE_2, ST77XX_WHITE);
   display_printAt("D2:+1  D1:OK", TFT_LINE_4, ST77XX_CYAN);
+  display_drawBatteryTopRight();
   for (;;) {
     if (buttons_pressed(CAL_BTN_PIN, CAL_BTN_ACTIVE_LEVEL)) {
       buttons_waitRelease(CAL_BTN_PIN, CAL_BTN_ACTIVE_LEVEL);
@@ -158,6 +162,7 @@ bool sensors_runHX711Calibration() {
   if (!hx711.wait_ready_timeout(3000)) {
     display_fillScreen(ST77XX_BLACK);
     display_printAt("HX711 not ready", TFT_LINE_2, ST77XX_RED);
+    display_drawBatteryTopRight();
     delay(1200);
     return false;
   }
@@ -184,6 +189,7 @@ bool sensors_runHX711Calibration() {
   display_printAt(String(res1), TFT_LINE_2, ST77XX_WHITE);
   display_printAt(String(res2), TFT_LINE_3, ST77XX_WHITE);
   display_printAt(String(res3), TFT_LINE_4, ST77XX_CYAN);
+  display_drawBatteryTopRight();
   delay(1500);
   return true;
 }
